@@ -22,13 +22,13 @@ import {
 
 let isEven = n => !(n % 2);
 let double = n => n * 2;
+let add3 = n => n + 3;
 let doubleEven = compose(isEven, double);
 console.assert([1,2,3].map(doubleEven).toString() === 'true,true,true');
 
 let concat = (arr, x) => Array.isArray(arr) ? arr.push.apply(arr, x) : [];
 let a = filter(isEven);
 let b = map(double);
-let mapDouble = map(double);
 let one = a(append, [1,2,3]);
 console.assert(one.toString() === '2');
  
@@ -42,6 +42,11 @@ let flatdouble = mapcat(double)(append);
 console.assert([[1],[2],[3]].reduce(flatdouble, []).toString() === '2,4,6');
 
 
+/******** Compose tests ********/
+
+let add3AndDouble = compose(double, add3);
+console.assert(add3AndDouble(1) === 8);
+
 /******** Append tests *********/
 
 let arr = [1];
@@ -53,6 +58,12 @@ console.assert(append(arr, 2).toString() === '1,2');
 
 arr = [[1],[2]];
 console.assert(arr.reduce(cat(append), []).toString() === '1,2');
+
+/******** Map Tests ************/
+
+let mapDouble = map(double);
+let six = [1,2].reduce(mapDouble((a, b) => { return a + b; }), 0);
+console.assert(six === 6, six);
 
 /******** Reduce tests *********/
 
@@ -68,15 +79,21 @@ foo[Symbol.iterator] = function* () {
 val = reduce(mapDouble(append), foo, []);
 console.assert(val.toString() === '2,4,6', val);
 
+console.assert(reduce((a, b) => { return a + b; }, [1,2,3], 0) === 6);
 
+/******* Filter tests ***********/ 
 
+let onlyEven = filter(isEven);
+console.assert([1,2,3].reduce(onlyEven(append), []).toString() === '2');
 
+/******* Cat tests **************/
 
+console.assert([[1], [2], [3]].reduce(cat(append), []).toString() === '1,2,3');
 
+/******* Take tests *************/
 
-
-
-
+let onetwo = [1,2,3].reduce(take(2)(append), []);
+console.assert(onetwo.toString() === '1,2', onetwo);
 
 
 

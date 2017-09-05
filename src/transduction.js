@@ -4,7 +4,7 @@
  * @license MIT
  * @copyright Jared Adam Smith, 2017
  *
- * Simple implementation of Transducers in JavaScript. Not meant to conform to the 
+ * Simple implementation of Transducers in JavaScript. Not meant to conform to the
  * Cognitect transducer protocol although obviously inspired by the clojure
  * implementation.
  */
@@ -66,26 +66,28 @@ const reduce = (reducer, coll, init) => {
   throw NON_ITER;
 };
 
-const factory = (process, initState) => xform => (reducer, coll) => {
-  let state = typeof initState === 'function' ? initState() : initState;
-  if (coll === undefined) { // return transducer
-    return (accum, input) => {
-      if (accum === undefined || accum === null) return reducer();
-      if (isReduced(accum)) return unWrap(accum);
-      return process(xform, reducer, accum, input, state);
-    };
+const enforceArgumentContract = f => (xform, reducer, accum, input, state) => {
+  // initialization
+  if (accum === undefined || accum === null) return reducer();
+  // completion, bubble
+  if (isReduced(accum)) return accum;
+  return f(xform, reducer, accum, input, state);
+};
+
+const factory = (process, initState) => xform => (reducer, coll, initValue) => {
+  let state = {};
+  state.value = typeof initState === 'function' ? initState() : initState;
+  let step = enforceArgumentContract(process);
+  let trans = (accum, input) => step(xform, reducer, accum, input, state);
+  if (coll === undefined) {
+    return trans; // return transducer
   } else if (typeof coll[Symbol.iterator] === 'function') {
-    const result = [];
-    for (let val of coll) {
-      process(xform, reducer, result, val, state);
-    }
-    return result;
+    let val = reduce(...[trans, coll, initValue].filter(exists));
+    return isReduced(val) ? unWrap(val) : val;
   } else {
     throw NON_ITER;
   }
 };
-
-const reduceStep = (xform, reducer, accum, input) => reducer(accum, input);
 
 const filter = factory((predicate, reducer, accum, input) => {
   return predicate(input) ? reducer(accum, input) : accum;
@@ -96,12 +98,12 @@ const map = factory((xform, reducer, accum, input) => {
 });
 
 const take = factory((n, reducer, accum, input, state) => {
-  if (state > n) {
+  if (state.value >= n) {
     return reduced(input);
   } else {
-    state += 1;
+    state.value += 1;
   }
-  return input;
+  return reducer(accum, input);
 }, () => 0);
 
 const cat = reducer => (accum, input) => input.reduce(reducer, accum);
