@@ -33,10 +33,6 @@ if (typeof Symbol === 'undefined' || typeof Symbol.iterator === 'undefined') {
   Symbol.iterator = _ => { throw NO_SYMBOL; };
 }
 
-const compose = (...fs) => x => fs.reduceRight((result, f) => {
-  return f(result);
-}, x);
-
 const exists = x => x != null;
 
 const DONE = Symbol('reduced value');
@@ -47,33 +43,66 @@ class _Wrapped {
 
 const isReduced = a => a instanceof _Wrapped;
 const reduced = a => a instanceof _Wrapped ? a : new _Wrapped(a);
-const unWrap = a => a[DONE];
-const reduce = (reducer, coll, init) => {
+const unWrap = a => isReduced(a) ? a[DONE] : a;
+const reduce = (reducer, coll, initial) => {
+  const init = exists(initial) ? initial : reducer();
   const nativeReduce = ['fold', 'foldl', 'reduce'].filter(s => coll[s] !== undefined)[0];
-  const args = [reducer, init].filter(exists);
-  if (nativeReduce) return coll[nativeReduce].apply(coll, args);
-  let results = [];
+  if (nativeReduce) return unWrap(coll[nativeReduce](reducer, init));
   if (typeof coll[Symbol.iterator] === 'function') {
-    results = [...coll];
-    return results.reduce.apply(results, args);
-  }
-
-  if (typeof coll.forEach === 'function') {
-    coll.forEach(v => results.push(v));
-    return results;
+    const iter = coll[Symbol.iterator]();
+    let result = init;
+    let val = iter.next();
+    while (!val.done) {
+      result = reducer(result, val.value);
+      if (isReduced(result)) break;
+      val = iter.next();
+    }
+    return result;
   }
 
   throw NON_ITER;
 };
 
+/*
+ * compose
+ * @variadic
+ *
+ * Takes any number of functions and returns a function that takes an argument
+ * and applies the functions in succession from right to left. All supplied
+ * functions should be unary.
+ *
+ * NOTE: you can compose Transducers using your own compose (e.g. lodash or 
+ * Ramda's `compose`) but you will need to make sure the last function called
+ * (first passed) is unWrap: this is necessary to preserve the bubbling
+ * semantics of completion for composed transducers.
+ */
+const compose = (...fs) => x => unWrap(fs.reduceRight((result, f) => {
+  return f(result);
+}, x));
+
+
 const enforceArgumentContract = f => (xform, reducer, accum, input, state) => {
   // initialization
-  if (accum === undefined || accum === null) return reducer();
-  // completion, bubble
+  if (!exists(input)) return reducer();
+  // Early termination, bubble
   if (isReduced(accum)) return accum;
   return f(xform, reducer, accum, input, state);
 };
 
+/*
+ * factory
+ *
+ * Helper for creating transducers.
+ *
+ * Takes a step process, intial state and returns a function that takes a
+ * transforming function which returns a transducer takes a reducing function,
+ * optional collection, optional initial value. If collection is not passed
+ * returns a modified reducing function, otherwise reduces the collection.
+ *
+ * NOTE: factory attempts to consume the entire iterable and should not be
+ * passed an infinite collection. The transducers returned however may be
+ * combined with a lazy infinite collection.
+ */
 const factory = (process, initState) => xform => (reducer, coll, initValue) => {
   let state = {};
   state.value = typeof initState === 'function' ? initState() : initState;
@@ -82,8 +111,7 @@ const factory = (process, initState) => xform => (reducer, coll, initValue) => {
   if (coll === undefined) {
     return trans; // return transducer
   } else if (typeof coll[Symbol.iterator] === 'function') {
-    let val = reduce(...[trans, coll, initValue].filter(exists));
-    return isReduced(val) ? unWrap(val) : val;
+    return unWrap(reduce(...[trans, coll, initValue].filter(exists))); 
   } else {
     throw NON_ITER;
   }
@@ -99,33 +127,42 @@ const map = factory((xform, reducer, accum, input) => {
 
 const take = factory((n, reducer, accum, input, state) => {
   if (state.value >= n) {
-    return reduced(input);
+    return reduced(accum);
   } else {
     state.value += 1;
   }
   return reducer(accum, input);
 }, () => 0);
 
-const cat = reducer => (accum, input) => input.reduce(reducer, accum);
+const cat = reducer => (accum, input) => reduce(reducer, input, accum);
 const mapcat = f => compose(cat, map(f));
 
 const transduce = (xform, reducer, coll, init) => {
   let start = init === undefined ? reducer() : init;
-  // TODO: reduce to handle nonArray, completion, early termination. Ditto cat.
-  return coll.reduce(reducer(f), init);
+  return reduce(xform(reducer), coll, init); 
 };
 
-const append = (arr, x) => {
-  if (arr === undefined) return [];
-  if (x === undefined) return arr;
-  arr.push(x);
-  return arr;
+const addArities = (defaultValue, reducer) => (...args) => {
+  switch (args.length) {
+    case 0: return typeof defaultValue === 'function' ? defaultValue() : defaultValue;
+    case 1: return args[0];
+    default: return reducer(...args);
+  }
 };
+
+const append = addArities(() => { return [] }, (arr, input) => {
+  let result = Array.isArray(arr) ? arr : [arr];
+  result.push(input);
+  return result;
+});
+
+const sum = addArities(0, (a, b) => a + b);
 
 export {
-  DONE,
   transduce,
   reduce,
+  isReduced,
+  unWrap,
   map,
   filter,
   cat,
@@ -133,4 +170,6 @@ export {
   take,
   append,
   compose,
+  sum,
+  addArities,
 };
